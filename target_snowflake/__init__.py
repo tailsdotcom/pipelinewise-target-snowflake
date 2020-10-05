@@ -164,7 +164,7 @@ def _persist_line(
             "A record for stream {} was encountered before a corresponding schema".format(o['stream']))
 
     # Get schema for this record's stream
-    stream = o['stream']
+    stream = container['stream']
 
     adjust_timestamps_in_record(record, schemas[stream])
 
@@ -194,7 +194,7 @@ def _persist_line(
 
     # append record
     if config.get('add_metadata_columns') or config.get('hard_delete'):
-        records_to_load[stream][primary_key_string] = add_metadata_values_to_record(o, stream_to_sync[stream])
+        records_to_load[stream][primary_key_string] = add_metadata_values_to_record(container, stream_to_sync[stream])
     else:
         records_to_load[stream][primary_key_string] = record
 
@@ -255,10 +255,11 @@ def persist_lines(config, lines, table_cache=None) -> None:
                 LOGGER.debug("Batch message detected. Running in fast_sync mode.")
                 batch_file = o['record'].get('file_path')
                 if os.path.exists(batch_file):
+                    LOGGER.info(f"Reading batch file '{batch_file}'")
                     with open(batch_file, 'r') as f:
                         for i, fline in enumerate(f):
-                            container = load_line(fline)
-                            record = container['record']
+                            container = o
+                            record = load_line(fline)
                             _persist_line(
                                 container, record, config,
                                 state, flushed_state, schemas, validators,

@@ -240,6 +240,10 @@ def persist_lines(config, lines, table_cache=None) -> None:
     total_row_count = {}
     batch_size_rows = config.get('batch_size_rows', DEFAULT_BATCH_SIZE_ROWS)
 
+    batch = config.get('fast_sync')
+    if batch in ('true', 1, 'True'):  # catch env config
+        batch = True
+
     # Loop over lines from stdin
     for line in lines:
         o = load_line(line)
@@ -251,7 +255,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
 
         if t == 'RECORD':
 
-            if config.get('fast_sync') and o['record'].get('__fast_sync_message__', False):
+            if batch and o['record'].get('__fast_sync_message__', False):
                 LOGGER.debug("Batch message detected. Running in fast_sync mode.")
                 batch_file = o['record'].get('file_path')
                 if os.path.exists(batch_file):

@@ -241,7 +241,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
     batch_size_rows = config.get('batch_size_rows', DEFAULT_BATCH_SIZE_ROWS)
 
     batch = config.get('fast_sync')
-    if batch in ('true', 1, 'True'):  # catch env config
+    if batch in ('true', 1, 'True', 'TRUE'):  # catch env config
         batch = True
     if batch:
         LOGGER.info("Fast Sync Enabled")

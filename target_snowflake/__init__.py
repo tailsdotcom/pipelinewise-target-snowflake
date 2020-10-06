@@ -243,6 +243,10 @@ def persist_lines(config, lines, table_cache=None) -> None:
     batch = config.get('fast_sync')
     if batch in ('true', 1, 'True'):  # catch env config
         batch = True
+    if batch:
+        LOGGER.info("Fast Sync Enabled")
+    else:
+        LOGGER.info(f"Fast Sync Disabled. Config value: '{batch}'")
 
     # Loop over lines from stdin
     for line in lines:

@@ -150,6 +150,83 @@ def adjust_timestamps_in_record(record: Dict, schema: Dict) -> None:
                     reset_new_value(record, key, schema['properties'][key]['format'])
 
 
+def _persist_line(
+    container, record, config,
+    state, flushed_state, schemas, validators,
+    records_to_load, row_count, stream_to_sync,
+    total_row_count, batch_size_rows
+):
+
+    if 'stream' not in container:
+        raise Exception("Line is missing required key 'stream': {}".format(line))
+    if container['stream'] not in schemas:
+        raise Exception(
+            "A record for stream {} was encountered before a corresponding schema".format(o['stream']))
+
+    # Get schema for this record's stream
+    stream = container['stream']
+
+    adjust_timestamps_in_record(record, schemas[stream])
+
+    # Validate record
+    if config.get('validate_records'):
+        try:
+            validators[stream].validate(float_to_decimal(record))
+        except Exception as ex:
+            if type(ex).__name__ == "InvalidOperation":
+                raise InvalidValidationOperationException(
+                    f"Data validation failed and cannot load to destination. RECORD: {record}\n"
+                    "multipleOf validations that allows long precisions are not supported (i.e. with 15 digits"
+                    "or more) Try removing 'multipleOf' methods from JSON schema.")
+            raise RecordValidationException(f"Record does not pass schema validation. RECORD: {record}")
+
+    primary_key_string = stream_to_sync[stream].record_primary_key_string(record)
+    if not primary_key_string:
+        primary_key_string = 'RID-{}'.format(total_row_count[stream])
+
+    if stream not in records_to_load:
+        records_to_load[stream] = {}
+
+    # increment row count only when a new PK is encountered in the current batch
+    if primary_key_string not in records_to_load[stream]:
+        row_count[stream] += 1
+        total_row_count[stream] += 1
+
+    # append record
+    if config.get('add_metadata_columns') or config.get('hard_delete'):
+        records_to_load[stream][primary_key_string] = add_metadata_values_to_record(container, stream_to_sync[stream])
+    else:
+        records_to_load[stream][primary_key_string] = record
+
+    if row_count[stream] >= batch_size_rows:
+        # flush all streams, delete records if needed, reset counts and then emit current state
+        if config.get('flush_all_streams'):
+            filter_streams = None
+        else:
+            filter_streams = [stream]
+
+        # Flush and return a new state dict with new positions only for the flushed streams
+        flushed_state = flush_streams(
+            records_to_load,
+            row_count,
+            stream_to_sync,
+            config,
+            state,
+            flushed_state,
+            filter_streams=filter_streams)
+
+        # emit last encountered state
+        emit_state(copy.deepcopy(flushed_state))
+
+
+def load_line(line):
+    try:
+        return json.loads(line)
+    except json.decoder.JSONDecodeError:
+        LOGGER.error("Unable to parse:\n{}".format(line))
+        raise
+
+
 # pylint: disable=too-many-locals,too-many-branches,too-many-statements
 def persist_lines(config, lines, table_cache=None) -> None:
     state = None
@@ -165,11 +242,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
 
     # Loop over lines from stdin
     for line in lines:
-        try:
-            o = json.loads(line)
-        except json.decoder.JSONDecodeError:
-            LOGGER.error("Unable to parse:\n{}".format(line))
-            raise
+        o = load_line(line)
 
         if 'type' not in o:
             raise Exception("Line is missing required key 'type': {}".format(line))
@@ -177,66 +250,29 @@ def persist_lines(config, lines, table_cache=None) -> None:
         t = o['type']
 
         if t == 'RECORD':
-            if 'stream' not in o:
-                raise Exception("Line is missing required key 'stream': {}".format(line))
-            if o['stream'] not in schemas:
-                raise Exception(
-                    "A record for stream {} was encountered before a corresponding schema".format(o['stream']))
 
-            # Get schema for this record's stream
-            stream = o['stream']
-
-            adjust_timestamps_in_record(o['record'], schemas[stream])
-
-            # Validate record
-            if config.get('validate_records'):
-                try:
-                    validators[stream].validate(float_to_decimal(o['record']))
-                except Exception as ex:
-                    if type(ex).__name__ == "InvalidOperation":
-                        raise InvalidValidationOperationException(
-                            f"Data validation failed and cannot load to destination. RECORD: {o['record']}\n"
-                            "multipleOf validations that allows long precisions are not supported (i.e. with 15 digits"
-                            "or more) Try removing 'multipleOf' methods from JSON schema.")
-                    raise RecordValidationException(f"Record does not pass schema validation. RECORD: {o['record']}")
-
-            primary_key_string = stream_to_sync[stream].record_primary_key_string(o['record'])
-            if not primary_key_string:
-                primary_key_string = 'RID-{}'.format(total_row_count[stream])
-
-            if stream not in records_to_load:
-                records_to_load[stream] = {}
-
-            # increment row count only when a new PK is encountered in the current batch
-            if primary_key_string not in records_to_load[stream]:
-                row_count[stream] += 1
-                total_row_count[stream] += 1
-
-            # append record
-            if config.get('add_metadata_columns') or config.get('hard_delete'):
-                records_to_load[stream][primary_key_string] = add_metadata_values_to_record(o, stream_to_sync[stream])
+            if config.get('fast_sync') and o['record'].get('__fast_sync_message__', False):
+                LOGGER.debug("Batch message detected. Running in fast_sync mode.")
+                batch_file = o['record'].get('file_path')
+                if os.path.exists(batch_file):
+                    LOGGER.info(f"Reading batch file '{batch_file}'")
+                    with open(batch_file, 'r') as f:
+                        for i, fline in enumerate(f):
+                            container = o
+                            record = load_line(fline)
+                            _persist_line(
+                                container, record, config,
+                                state, flushed_state, schemas, validators,
+                                records_to_load, row_count, stream_to_sync,
+                                total_row_count, batch_size_rows
+                            )
             else:
-                records_to_load[stream][primary_key_string] = o['record']
-
-            if row_count[stream] >= batch_size_rows:
-                # flush all streams, delete records if needed, reset counts and then emit current state
-                if config.get('flush_all_streams'):
-                    filter_streams = None
-                else:
-                    filter_streams = [stream]
-
-                # Flush and return a new state dict with new positions only for the flushed streams
-                flushed_state = flush_streams(
-                    records_to_load,
-                    row_count,
-                    stream_to_sync,
-                    config,
-                    state,
-                    flushed_state,
-                    filter_streams=filter_streams)
-
-                # emit last encountered state
-                emit_state(copy.deepcopy(flushed_state))
+                _persist_line(
+                    o, o['record'], config,
+                    state, flushed_state, schemas, validators,
+                    records_to_load, row_count, stream_to_sync,
+                    total_row_count, batch_size_rows
+                )
 
         elif t == 'SCHEMA':
             if 'stream' not in o:

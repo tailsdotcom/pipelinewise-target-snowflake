@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import copy
+import time
 
 from datetime import datetime
 from decimal import Decimal
@@ -245,8 +246,6 @@ def persist_lines(config, lines, table_cache=None) -> None:
         batch = True
     if batch:
         LOGGER.info("Fast Sync Enabled")
-    else:
-        LOGGER.info(f"Fast Sync Disabled. Config value: '{batch}'")
 
     # Loop over lines from stdin
     for line in lines:
@@ -260,10 +259,10 @@ def persist_lines(config, lines, table_cache=None) -> None:
         if t == 'RECORD':
 
             if batch and o['record'].get('__fast_sync_message__', False):
-                LOGGER.debug("Batch message detected. Running in fast_sync mode.")
+                tic = time.clock()
+                batch_row_count = 0
                 batch_file = o['record'].get('file_path')
                 if os.path.exists(batch_file):
-                    LOGGER.info(f"Reading batch file '{batch_file}'")
                     with open(batch_file, 'r') as f:
                         for i, fline in enumerate(f):
                             container = o
@@ -274,6 +273,9 @@ def persist_lines(config, lines, table_cache=None) -> None:
                                 records_to_load, row_count, stream_to_sync,
                                 total_row_count, batch_size_rows
                             )
+                            batch_row_count += 1
+                    time_taken = time.clock() - tic
+                    LOGGER.info(f"Processed {batch_row_count} records from file '{batch_file}' in {time_taken}s")
             else:
                 _persist_line(
                     o, o['record'], config,

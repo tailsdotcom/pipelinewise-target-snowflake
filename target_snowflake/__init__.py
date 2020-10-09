@@ -226,6 +226,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
             batch = all((batch, o['record'].get('__fast_sync_message__', False)))
             if batch:
                 batch_file_path = o['record'].get('file_path')
+                batch_size_rows = o['record'].get('batch_size', batch_size_rows)
                 if os.path.exists(batch_file_path):
                     batch_file = open(batch_file_path, 'r')
                     records = read_lines(o, batch_file)
@@ -262,7 +263,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
                     else:
                         records_to_load[stream][primary_key_string] = o['record']
 
-                    if (row_count[stream] >= batch_size_rows) or batch:
+                    if (row_count[stream] >= batch_size_rows):
                         # flush all streams, delete records if needed, reset counts and then emit current state
                         if config.get('flush_all_streams'):
                             filter_streams = None
@@ -288,7 +289,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
             if batch:
                 # close file
                 batch_file.close()
-                # put batch_size_rows back
+                # reset the batch size for non-batch records
                 batch_size_rows = config.get('batch_size_rows', DEFAULT_BATCH_SIZE_ROWS)
                 LOGGER.info(f"Processed {batch_row_count} records from file '{batch_file}' in {time_taken}s")
 

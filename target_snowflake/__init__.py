@@ -262,6 +262,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
                 tic = time.clock()
                 batch_row_count = 0
                 batch_file = o['record'].get('file_path')
+                fast_sync_batch_size_rows = o['record'].get('batch_size', batch_size_rows)
                 if os.path.exists(batch_file):
                     with open(batch_file, 'r') as f:
                         for i, fline in enumerate(f):
@@ -271,7 +272,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
                                 container, record, config,
                                 state, flushed_state, schemas, validators,
                                 records_to_load, row_count, stream_to_sync,
-                                total_row_count, batch_size_rows
+                                total_row_count, fast_sync_batch_size_rows
                             )
                             batch_row_count += 1
                     time_taken = time.clock() - tic

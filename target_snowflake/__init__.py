@@ -291,7 +291,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
                 batch_file.close()
                 # reset the batch size for non-batch records
                 batch_size_rows = config.get('batch_size_rows', DEFAULT_BATCH_SIZE_ROWS)
-                LOGGER.info(f"Processed {batch_row_count} records from file '{batch_file}' in {time_taken}s")
+                LOGGER.info(f"Processed {batch_row_count} records from file '{batch_file_path}' in {time_taken}s")
 
         elif t == 'SCHEMA':
             if 'stream' not in o:

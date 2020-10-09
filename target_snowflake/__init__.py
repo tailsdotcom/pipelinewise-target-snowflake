@@ -150,6 +150,7 @@ def adjust_timestamps_in_record(record: Dict, schema: Dict) -> None:
                         schema['properties'][key].get('format', None) in {'date-time', 'time', 'date'}:
                     reset_new_value(record, key, schema['properties'][key]['format'])
 
+
 def validate_record(record, stream, validators):
     try:
         validators[stream].validate(float_to_decimal(record))
@@ -162,6 +163,14 @@ def validate_record(record, stream, validators):
         raise RecordValidationException(f"Record does not pass schema validation. RECORD: {record}")
 
 
+def load_line(line):
+    try:
+        return json.loads(line)
+    except json.decoder.JSONDecodeError:
+        LOGGER.error("Unable to parse:\n{}".format(line))
+        raise
+
+
 def read_lines(container, file_handler, block_size=10000):
     """ Generator for reading large files containing singer records.
     Returns blocks of records at a time.
@@ -169,11 +178,7 @@ def read_lines(container, file_handler, block_size=10000):
     block = []
     for line in file_handler:
         record = copy.deepcopy(container)
-        try:
-            record['record'] = json.loads(line)
-        except json.decoder.JSONDecodeError:
-            LOGGER.error("Unable to parse:\n{}".format(line))
-            raise
+        record['record'] = load_line(line)
         block.append(record)
         if len(block) == block_size:
             yield block

@@ -171,7 +171,7 @@ def load_line(line):
         raise
 
 
-def read_lines(container, file_handler, block_size=10000):
+def read_lines(container, file_handler, block_size=500000):
     """ Generator for reading large files containing singer records.
     Returns blocks of records at a time.
     """
@@ -183,6 +183,8 @@ def read_lines(container, file_handler, block_size=10000):
         if len(block) == block_size:
             yield block
             block = []
+    if block:
+        yield block
 
 
 # pylint: disable=too-many-locals,too-many-branches,too-many-statements

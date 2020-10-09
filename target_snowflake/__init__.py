@@ -164,6 +164,7 @@ def validate_record(record, stream, validators):
 
 def read_lines(container, file_handler, block_size=10000):
     """ Generator for reading large files containing singer records.
+    Returns blocks of records at a time.
     """
     block = []
     for line in file_handler:
@@ -226,56 +227,57 @@ def persist_lines(config, lines, table_cache=None) -> None:
                 else:
                     raise Exception(f"Batch file Not Found: {batch_file_path}")
             else:
-                records = [o]
+                records = [[o]]  # create a single block with a single record
 
             # process records
             tic = time.clock()
             batch_row_count = 0
-            for o in records:
+            for block in records:
+                for o in block:
 
-                adjust_timestamps_in_record(record, schemas[stream])
-                if config.get('validate_records'):
-                    validate_record(record, stream, validators)
+                    adjust_timestamps_in_record(record, schemas[stream])
+                    if config.get('validate_records'):
+                        validate_record(record, stream, validators)
 
-                primary_key_string = stream_to_sync[stream].record_primary_key_string(o['record'])
-                if not primary_key_string:
-                    primary_key_string = 'RID-{}'.format(total_row_count[stream])
+                    primary_key_string = stream_to_sync[stream].record_primary_key_string(o['record'])
+                    if not primary_key_string:
+                        primary_key_string = 'RID-{}'.format(total_row_count[stream])
 
-                if stream not in records_to_load:
-                    records_to_load[stream] = {}
+                    if stream not in records_to_load:
+                        records_to_load[stream] = {}
 
-                # increment row count only when a new PK is encountered in the current batch
-                if primary_key_string not in records_to_load[stream]:
-                    row_count[stream] += 1
-                    total_row_count[stream] += 1
+                    # increment row count only when a new PK is encountered in the current batch
+                    if primary_key_string not in records_to_load[stream]:
+                        row_count[stream] += 1
+                        total_row_count[stream] += 1
 
-                # append record
-                if config.get('add_metadata_columns') or config.get('hard_delete'):
-                    records_to_load[stream][primary_key_string] = add_metadata_values_to_record(o, stream_to_sync[stream])
-                else:
-                    records_to_load[stream][primary_key_string] = o['record']
-
-                if (row_count[stream] >= batch_size_rows) or batch:
-                    # flush all streams, delete records if needed, reset counts and then emit current state
-                    if config.get('flush_all_streams'):
-                        filter_streams = None
+                    # append record
+                    if config.get('add_metadata_columns') or config.get('hard_delete'):
+                        records_to_load[stream][primary_key_string] = add_metadata_values_to_record(o, stream_to_sync[stream])
                     else:
-                        filter_streams = [stream]
+                        records_to_load[stream][primary_key_string] = o['record']
 
-                    # Flush and return a new state dict with new positions only for the flushed streams
-                    flushed_state = flush_streams(
-                        records_to_load,
-                        row_count,
-                        stream_to_sync,
-                        config,
-                        state,
-                        flushed_state,
-                        filter_streams=filter_streams
-                    )
+                    if (row_count[stream] >= batch_size_rows) or batch:
+                        # flush all streams, delete records if needed, reset counts and then emit current state
+                        if config.get('flush_all_streams'):
+                            filter_streams = None
+                        else:
+                            filter_streams = [stream]
 
-                    # emit last encountered state
-                    emit_state(copy.deepcopy(flushed_state))
-                batch_row_count += 1
+                        # Flush and return a new state dict with new positions only for the flushed streams
+                        flushed_state = flush_streams(
+                            records_to_load,
+                            row_count,
+                            stream_to_sync,
+                            config,
+                            state,
+                            flushed_state,
+                            filter_streams=filter_streams
+                        )
+
+                        # emit last encountered state
+                        emit_state(copy.deepcopy(flushed_state))
+                    batch_row_count += 1
 
             time_taken = time.clock() - tic
             if batch:

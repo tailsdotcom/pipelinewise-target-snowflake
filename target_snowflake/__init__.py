@@ -240,9 +240,9 @@ def persist_lines(config, lines, table_cache=None) -> None:
             for block in records:
                 for o in block:
 
-                    adjust_timestamps_in_record(record, schemas[stream])
+                    adjust_timestamps_in_record(o, schemas[stream])
                     if config.get('validate_records'):
-                        validate_record(record, stream, validators)
+                        validate_record(o, stream, validators)
 
                     primary_key_string = stream_to_sync[stream].record_primary_key_string(o['record'])
                     if not primary_key_string:

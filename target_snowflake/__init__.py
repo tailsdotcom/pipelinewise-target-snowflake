@@ -240,6 +240,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
             batch_row_count = 0
             for block in records:
                 for o in block:
+                    batch_row_count += 1
 
                     adjust_timestamps_in_record(o, schemas[stream])
                     if config.get('validate_records'):
@@ -283,12 +284,12 @@ def persist_lines(config, lines, table_cache=None) -> None:
 
                         # emit last encountered state
                         emit_state(copy.deepcopy(flushed_state))
-                    batch_row_count += 1
 
             time_taken = time.clock() - tic
             if batch:
-                # close file
+                # close and remove processed file
                 batch_file.close()
+                os.remove(batch_file_path)
                 # reset the batch size for non-batch records
                 batch_size_rows = config.get('batch_size_rows', DEFAULT_BATCH_SIZE_ROWS)
                 LOGGER.info(f"Processed {batch_row_count} records from file '{batch_file_path}' in {time_taken}s")

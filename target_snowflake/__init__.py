@@ -10,6 +10,10 @@ import sys
 import copy
 import time
 
+# For debugging
+import tracemalloc
+tracemalloc.start()
+
 from datetime import datetime
 from decimal import Decimal
 from tempfile import mkstemp
@@ -234,6 +238,15 @@ def persist_lines(config, lines, table_cache=None) -> None:
                     records = read_lines(o, batch_file)
                 else:
                     raise Exception(f"Batch file Not Found: {batch_file_path}")
+
+                # Debugging
+                snapshot = tracemalloc.take_snapshot()
+                top_stats = snapshot.statistics('lineno')
+
+                LOGGER.info("[ Top 10 ]")
+                for stat in top_stats[:10]:
+                    LOGGER.info(stat)
+
             else:
                 records = [[o]]  # create a single block with a single record
 

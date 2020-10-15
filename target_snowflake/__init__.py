@@ -270,7 +270,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
                         records_to_load[stream][primary_key_string] = o['record']
 
             if (row_count[stream] >= batch_size_rows) or batch_flush_hint:
-                flush_reason = 'reached batch_size_rows' if (row_count[stream] >= batch_size_rows) else 'received batch_flush_hint'
+                flush_reason = f'reached batch_size_rows of {batch_size_rows}' if (row_count[stream] >= batch_size_rows) else 'received batch_flush_hint'
                 LOGGER.info(f"Flushing streams: {flush_reason}")
                 # flush all streams, delete records if needed, reset counts and then emit current state
                 if config.get('flush_all_streams'):

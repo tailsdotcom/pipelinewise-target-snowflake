@@ -10,10 +10,6 @@ import sys
 import copy
 import time
 
-# For debugging
-import tracemalloc
-tracemalloc.start()
-
 from datetime import datetime
 from decimal import Decimal
 from tempfile import mkstemp
@@ -241,14 +237,6 @@ def persist_lines(config, lines, table_cache=None) -> None:
                 else:
                     raise Exception(f"Batch file Not Found: {batch_file_path}")
 
-                # Debugging
-                snapshot = tracemalloc.take_snapshot()
-                top_stats = snapshot.statistics('lineno')
-
-                LOGGER.info("[ Top 10 ]")
-                for stat in top_stats[:10]:
-                    LOGGER.info(stat)
-
             else:
                 records = [[o]]  # create a single block with a single record
 
@@ -282,6 +270,8 @@ def persist_lines(config, lines, table_cache=None) -> None:
                         records_to_load[stream][primary_key_string] = o['record']
 
                     if (row_count[stream] >= batch_size_rows) or batch_flush_hint:
+                        flush_reason = 'reached batch_size_rows' if (row_count[stream] >= batch_size_rows) else 'received batch_flush_hint'
+                        LOGGER.info(f"Flushing streams: {flush_reason}")
                         # flush all streams, delete records if needed, reset counts and then emit current state
                         if config.get('flush_all_streams'):
                             filter_streams = None

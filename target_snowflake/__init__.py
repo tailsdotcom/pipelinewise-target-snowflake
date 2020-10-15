@@ -203,6 +203,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
     stream_to_sync = {}
     total_row_count = {}
     batch_size_rows = config.get('batch_size_rows', DEFAULT_BATCH_SIZE_ROWS)
+    batch_flush_hint = False
 
     batch = config.get('fast_sync')
     if batch in ('true', 1, 'True', 'TRUE'):  # catch env config
@@ -229,10 +230,11 @@ def persist_lines(config, lines, table_cache=None) -> None:
 
             stream = o['stream']
 
-            batch = all((batch, o['record'].get('__fast_sync_message__', False)))
-            if batch:
+            batch_record = all((batch, o['record'].get('__fast_sync_message__', False)))
+            if batch_record:
                 batch_file_path = o['record'].get('file_path')
-                batch_size_rows = o['record'].get('batch_size', batch_size_rows)
+                batch_size_rows = o['record'].get('hint_batch_size', batch_size_rows)
+                batch_flush_hint = o['record'].get('hint_last_batch', False)
                 if os.path.exists(batch_file_path):
                     batch_file = open(batch_file_path, 'r')
                     records = read_lines(o, batch_file)
@@ -279,29 +281,22 @@ def persist_lines(config, lines, table_cache=None) -> None:
                     else:
                         records_to_load[stream][primary_key_string] = o['record']
 
-                    if (row_count[stream] >= batch_size_rows):
+                    if (row_count[stream] >= batch_size_rows) or batch_flush_hint:
                         # flush all streams, delete records if needed, reset counts and then emit current state
                         if config.get('flush_all_streams'):
                             filter_streams = None
                         else:
                             filter_streams = [stream]
-
                         # Flush and return a new state dict with new positions only for the flushed streams
                         flushed_state = flush_streams(
-                            records_to_load,
-                            row_count,
-                            stream_to_sync,
-                            config,
-                            state,
-                            flushed_state,
-                            filter_streams=filter_streams
+                            records_to_load, row_count, stream_to_sync, config, state,
+                            flushed_state, filter_streams=filter_streams
                         )
-
                         # emit last encountered state
                         emit_state(copy.deepcopy(flushed_state))
 
             time_taken = time.clock() - tic
-            if batch:
+            if batch_record:
                 # close and remove processed file
                 batch_file.close()
                 os.remove(batch_file_path)
@@ -327,7 +322,9 @@ def persist_lines(config, lines, table_cache=None) -> None:
                 # if same stream has been encountered again, it means the schema might have been altered
                 # so previous records need to be flushed
                 if row_count.get(stream, 0) > 0:
-                    flushed_state = flush_streams(records_to_load, row_count, stream_to_sync, config, state, flushed_state)
+                    flushed_state = flush_streams(
+                        records_to_load, row_count, stream_to_sync, config, state, flushed_state
+                    )
 
                     # emit latest encountered state
                     emit_state(flushed_state)
@@ -380,7 +377,9 @@ def persist_lines(config, lines, table_cache=None) -> None:
     # then flush all buckets.
     if sum(row_count.values()) > 0:
         # flush all streams one last time, delete records if needed, reset counts and then emit current state
-        flushed_state = flush_streams(records_to_load, row_count, stream_to_sync, config, state, flushed_state)
+        flushed_state = flush_streams(
+            records_to_load, row_count, stream_to_sync, config, state, flushed_state
+        )
 
     # emit latest state
     emit_state(copy.deepcopy(flushed_state))

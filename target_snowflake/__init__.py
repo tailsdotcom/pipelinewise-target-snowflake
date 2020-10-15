@@ -199,7 +199,6 @@ def persist_lines(config, lines, table_cache=None) -> None:
     stream_to_sync = {}
     total_row_count = {}
     batch_size_rows = config.get('batch_size_rows', DEFAULT_BATCH_SIZE_ROWS)
-    batch_flush_hint = False
 
     batch = config.get('fast_sync')
     if batch in ('true', 1, 'True', 'TRUE'):  # catch env config
@@ -215,6 +214,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
             raise Exception("Line is missing required key 'type': {}".format(line))
 
         t = o['type']
+
 
         if t == 'RECORD':
 
@@ -269,21 +269,21 @@ def persist_lines(config, lines, table_cache=None) -> None:
                     else:
                         records_to_load[stream][primary_key_string] = o['record']
 
-                    if (row_count[stream] >= batch_size_rows) or batch_flush_hint:
-                        flush_reason = 'reached batch_size_rows' if (row_count[stream] >= batch_size_rows) else 'received batch_flush_hint'
-                        LOGGER.info(f"Flushing streams: {flush_reason}")
-                        # flush all streams, delete records if needed, reset counts and then emit current state
-                        if config.get('flush_all_streams'):
-                            filter_streams = None
-                        else:
-                            filter_streams = [stream]
-                        # Flush and return a new state dict with new positions only for the flushed streams
-                        flushed_state = flush_streams(
-                            records_to_load, row_count, stream_to_sync, config, state,
-                            flushed_state, filter_streams=filter_streams
-                        )
-                        # emit last encountered state
-                        emit_state(copy.deepcopy(flushed_state))
+            if (row_count[stream] >= batch_size_rows) or batch_flush_hint:
+                flush_reason = 'reached batch_size_rows' if (row_count[stream] >= batch_size_rows) else 'received batch_flush_hint'
+                LOGGER.info(f"Flushing streams: {flush_reason}")
+                # flush all streams, delete records if needed, reset counts and then emit current state
+                if config.get('flush_all_streams'):
+                    filter_streams = None
+                else:
+                    filter_streams = [stream]
+                # Flush and return a new state dict with new positions only for the flushed streams
+                flushed_state = flush_streams(
+                    records_to_load, row_count, stream_to_sync, config, state,
+                    flushed_state, filter_streams=filter_streams
+                )
+                # emit last encountered state
+                emit_state(copy.deepcopy(flushed_state))
 
             time_taken = time.clock() - tic
             if batch_record:

@@ -171,7 +171,7 @@ def load_line(line):
         raise
 
 
-def read_lines(container, file_handler, block_size=500000):
+def read_lines(container, file_handler, block_size=DEFAULT_BATCH_SIZE_ROWS):
     """ Generator for reading large files containing singer records.
     Returns blocks of records at a time.
     """
@@ -229,11 +229,11 @@ def persist_lines(config, lines, table_cache=None) -> None:
             batch_record = all((batch, o['record'].get('__fast_sync_message__', False)))
             if batch_record:
                 batch_file_path = o['record'].get('file_path')
-                batch_size_rows = o['record'].get('hint_batch_size', batch_size_rows)
+                # batch_size_rows = o['record'].get('hint_batch_size', batch_size_rows)
                 batch_flush_hint = o['record'].get('hint_last_batch', False)
                 if os.path.exists(batch_file_path):
                     batch_file = open(batch_file_path, 'r')
-                    records = read_lines(o, batch_file)
+                    records = read_lines(o, batch_file, block_size=batch_size_rows)
                 else:
                     raise Exception(f"Batch file Not Found: {batch_file_path}")
 
@@ -269,21 +269,22 @@ def persist_lines(config, lines, table_cache=None) -> None:
                     else:
                         records_to_load[stream][primary_key_string] = o['record']
 
-            if (row_count[stream] >= batch_size_rows) or batch_flush_hint:
-                flush_reason = f'reached batch_size_rows of {batch_size_rows}' if (row_count[stream] >= batch_size_rows) else 'received batch_flush_hint'
-                LOGGER.info(f"Flushing streams: {flush_reason}")
-                # flush all streams, delete records if needed, reset counts and then emit current state
-                if config.get('flush_all_streams'):
-                    filter_streams = None
-                else:
-                    filter_streams = [stream]
-                # Flush and return a new state dict with new positions only for the flushed streams
-                flushed_state = flush_streams(
-                    records_to_load, row_count, stream_to_sync, config, state,
-                    flushed_state, filter_streams=filter_streams
-                )
-                # emit last encountered state
-                emit_state(copy.deepcopy(flushed_state))
+                # For batch, the file read block size will equal batch_size_rows, so flush on each block
+                if (row_count[stream] >= batch_size_rows) or batch_flush_hint:
+                    flush_reason = f'reached batch_size_rows of {batch_size_rows}' if (row_count[stream] >= batch_size_rows) else 'received batch_flush_hint'
+                    LOGGER.info(f"Flushing streams: {flush_reason}")
+                    # flush all streams, delete records if needed, reset counts and then emit current state
+                    if config.get('flush_all_streams'):
+                        filter_streams = None
+                    else:
+                        filter_streams = [stream]
+                    # Flush and return a new state dict with new positions only for the flushed streams
+                    flushed_state = flush_streams(
+                        records_to_load, row_count, stream_to_sync, config, state,
+                        flushed_state, filter_streams=filter_streams
+                    )
+                    # emit last encountered state
+                    emit_state(copy.deepcopy(flushed_state))
 
             time_taken = time.clock() - tic
             if batch_record:

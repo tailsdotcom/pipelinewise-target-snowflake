@@ -252,10 +252,8 @@ def persist_lines(config, lines, table_cache=None) -> None:
                     if config.get('validate_records'):
                         validate_record(o, stream, validators)
 
-                    primary_key_string = (
-                        stream_to_sync[stream]
+                    primary_key_string = stream_to_sync[stream]\
                         .record_primary_key_string(o['record']
-                    )
                     if not primary_key_string:
                         primary_key_string = (
                             'RID-{}'.format(total_row_count[stream])

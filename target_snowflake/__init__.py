@@ -225,15 +225,16 @@ def persist_lines(config, lines, table_cache=None) -> None:
                     "A record for stream {} was encountered before a corresponding schema".format(o['stream']))
 
             stream = o['stream']
-
+            batch_flush_hint = False
             batch_record = all((batch, o['record'].get('__fast_sync_message__', False)))
             if batch_record:
                 batch_file_path = o['record'].get('file_path')
-                # batch_size_rows = o['record'].get('hint_batch_size', batch_size_rows)
                 batch_flush_hint = o['record'].get('hint_last_batch', False)
                 if os.path.exists(batch_file_path):
                     batch_file = open(batch_file_path, 'r')
-                    records = read_lines(o, batch_file, block_size=batch_size_rows)
+                    records = read_lines(
+                        o, batch_file, block_size=batch_size_rows
+                    )
                 else:
                     raise Exception(f"Batch file Not Found: {batch_file_path}")
 
@@ -251,9 +252,14 @@ def persist_lines(config, lines, table_cache=None) -> None:
                     if config.get('validate_records'):
                         validate_record(o, stream, validators)
 
-                    primary_key_string = stream_to_sync[stream].record_primary_key_string(o['record'])
+                    primary_key_string = (
+                        stream_to_sync[stream]
+                        .record_primary_key_string(o['record']
+                    )
                     if not primary_key_string:
-                        primary_key_string = 'RID-{}'.format(total_row_count[stream])
+                        primary_key_string = (
+                            'RID-{}'.format(total_row_count[stream])
+                        )
 
                     if stream not in records_to_load:
                         records_to_load[stream] = {}
@@ -265,13 +271,18 @@ def persist_lines(config, lines, table_cache=None) -> None:
 
                     # append record
                     if config.get('add_metadata_columns') or config.get('hard_delete'):
-                        records_to_load[stream][primary_key_string] = add_metadata_values_to_record(o, stream_to_sync[stream])
+                        records_to_load[stream][primary_key_string] = \
+                            add_metadata_values_to_record(o, stream_to_sync[stream])
                     else:
                         records_to_load[stream][primary_key_string] = o['record']
 
                 # For batch, the file read block size will equal batch_size_rows, so flush on each block
                 if (row_count[stream] >= batch_size_rows) or batch_flush_hint:
-                    flush_reason = f'reached batch_size_rows of {batch_size_rows}' if (row_count[stream] >= batch_size_rows) else 'received batch_flush_hint'
+                    flush_reason = (
+                        f'reached batch_size_rows of {batch_size_rows}'
+                        if (row_count[stream] >= batch_size_rows)
+                        else 'received batch_flush_hint'
+                    )
                     LOGGER.info(f"Flushing streams: {flush_reason}")
                     # flush all streams, delete records if needed, reset counts and then emit current state
                     if config.get('flush_all_streams'):
@@ -435,13 +446,14 @@ def flush_streams(
 
         # Update flushed streams
         if filter_streams:
-            # update flushed_state position if we have state information for the stream
+            # update flushed_state position if we have state information stream
             if state is not None and stream in state.get('bookmarks', {}):
                 # Create bookmark key if not exists
                 if 'bookmarks' not in flushed_state:
                     flushed_state['bookmarks'] = {}
                 # Copy the stream bookmark from the latest state
-                flushed_state['bookmarks'][stream] = copy.deepcopy(state['bookmarks'][stream])
+                flushed_state['bookmarks'][stream] = \
+                    copy.deepcopy(state['bookmarks'][stream])
 
         # If we flush every bucket use the latest state
         else:
@@ -451,27 +463,35 @@ def flush_streams(
     return flushed_state
 
 
-def load_stream_batch(stream, records_to_load, row_count, db_sync, no_compression=False, delete_rows=False,
-                      temp_dir=None):
+def load_stream_batch(
+    stream, records_to_load, row_count, db_sync,
+    no_compression=False, delete_rows=False, temp_dir=None
+):
     # Load into snowflake
     if row_count[stream] > 0:
-        flush_records(stream, records_to_load, row_count[stream], db_sync, temp_dir, no_compression)
-
+        flush_records(
+            stream, records_to_load, row_count[stream],
+            db_sync, temp_dir, no_compression
+        )
         # Delete soft-deleted, flagged rows - where _sdc_deleted at is not null
         if delete_rows:
             db_sync.delete_rows(stream)
-
         # reset row count for the current stream
         row_count[stream] = 0
 
 
-def write_record_to_file(outfile, records_to_load, record_to_csv_line_transformer):
+def write_record_to_file(
+    outfile, records_to_load, record_to_csv_line_transformer
+):
     for record in records_to_load.values():
         csv_line = record_to_csv_line_transformer(record)
         outfile.write(bytes(csv_line + '\n', 'UTF-8'))
 
 
-def flush_records(stream, records_to_load, row_count, db_sync, temp_dir=None, no_compression=False):
+def flush_records(
+    stream, records_to_load, row_count, db_sync,
+    temp_dir=None, no_compression=False
+):
     if temp_dir:
         os.makedirs(temp_dir, exist_ok=True)
     csv_fd, csv_file = mkstemp(suffix='.csv', prefix='records_', dir=temp_dir)
@@ -480,13 +500,19 @@ def flush_records(stream, records_to_load, row_count, db_sync, temp_dir=None, no
     # Using gzip or plain file object
     if no_compression:
         with open(csv_fd, 'wb') as outfile:
-            write_record_to_file(outfile, records_to_load, record_to_csv_line_transformer)
+            write_record_to_file(
+                outfile, records_to_load, record_to_csv_line_transformer
+            )
     else:
         with gzip.open(csv_file, 'wb') as outfile:
-            write_record_to_file(outfile, records_to_load, record_to_csv_line_transformer)
+            write_record_to_file(
+                outfile, records_to_load, record_to_csv_line_transformer
+            )
 
     size_bytes = os.path.getsize(csv_file)
-    s3_key = db_sync.put_to_stage(csv_file, stream, row_count, temp_dir=temp_dir)
+    s3_key = db_sync.put_to_stage(
+        csv_file, stream, row_count, temp_dir=temp_dir
+    )
     db_sync.load_csv(s3_key, row_count, size_bytes)
 
     os.remove(csv_file)

@@ -504,10 +504,9 @@ def flush_records(
                 outfile, records_to_load, record_to_csv_line_transformer
             )
     else:
-        with gzip.open(csv_file, 'wb') as outfile:
-            write_record_to_file(
-                outfile, records_to_load, record_to_csv_line_transformer
-            )
+        with open(csv_fd, 'wb') as outfile:
+            with gzip.GzipFile(filename=csv_file, mode='wb',fileobj=outfile) as gzipfile:
+                write_record_to_file(gzipfile, records_to_load, record_to_csv_line_transformer)
 
     size_bytes = os.path.getsize(csv_file)
     s3_key = db_sync.put_to_stage(
@@ -516,7 +515,7 @@ def flush_records(
     db_sync.load_csv(s3_key, row_count, size_bytes)
 
     os.remove(csv_file)
-    db_sync.delete_from_stage(s3_key)
+    db_sync.delete_from_stage(stream, s3_key)
 
 
 def main():

@@ -10,8 +10,10 @@ from nose.tools import assert_raises
 import target_snowflake
 from target_snowflake import RecordValidationException
 from target_snowflake.db_sync import DbSync
+from target_snowflake.s3_upload_client import S3UploadClient
 
 from snowflake.connector.errors import ProgrammingError
+from snowflake.connector.errors import DatabaseError
 
 try:
     import tests.utils as test_utils
@@ -932,8 +934,8 @@ class TestIntegration(unittest.TestCase):
             del self.config['aws_secret_access_key']
 
             # Create a new S3 client using env vars
-            snowflake = DbSync(self.config)
-            snowflake.create_s3_client()
+            s3Client = S3UploadClient(self.config)
+            s3Client.create_s3_client()
 
         # Restore the original state to not confuse other tests
         finally:
@@ -954,8 +956,8 @@ class TestIntegration(unittest.TestCase):
 
             # Create a new S3 client using profile based authentication
             with assert_raises(botocore.exceptions.ProfileNotFound):
-                snowflake = DbSync(self.config)
-                snowflake.create_s3_client()
+                s3UploaddClient = S3UploadClient(self.config)
+                s3UploaddClient.create_s3_client()
 
         # Restore the original state to not confuse other tests
         finally:
@@ -974,8 +976,8 @@ class TestIntegration(unittest.TestCase):
 
             # Create a new S3 client using profile based authentication
             with assert_raises(botocore.exceptions.ProfileNotFound):
-                snowflake = DbSync(self.config)
-                snowflake.create_s3_client()
+                s3UploaddClient = S3UploadClient(self.config)
+                s3UploaddClient.create_s3_client()
 
         # Restore the original state to not confuse other tests
         finally:
@@ -993,8 +995,8 @@ class TestIntegration(unittest.TestCase):
 
             # Botocore should raise ValurError in case of fake S3 endpoint url
             with assert_raises(ValueError):
-                snowflake = DbSync(self.config)
-                snowflake.create_s3_client()
+                s3UploaddClient = S3UploadClient(self.config)
+                s3UploaddClient.create_s3_client()
 
         # Restore the original state to not confuse other tests
         finally:
@@ -1040,3 +1042,61 @@ class TestIntegration(unittest.TestCase):
 
         # Reset parameters default
         snowflake.query(f"ALTER USER {self.config['user']} UNSET QUOTED_IDENTIFIERS_IGNORE_CASE")
+
+    def test_query_tagging(self):
+        """Loading multiple tables with query tagging"""
+        snowflake = DbSync(self.config)
+        tap_lines = test_utils.get_test_tap_lines('messages-with-three-streams.json')
+        current_time = datetime.datetime.now().strftime('%H:%M:%s')
+
+        # Tag queries with dynamic schema and table tokens
+        self.config['query_tag'] = f'PPW test tap run at {current_time}. Loading into {{schema}}.{{table}}'
+        self.persist_lines_with_cache(tap_lines)
+
+        # Get query tags from QUERY_HISTORY
+        result = snowflake.query("SELECT query_tag, count(*) queries "
+                                 f"FROM table(information_schema.query_history_by_user('{self.config['user']}')) "
+                                 f"WHERE query_tag like '%PPW test tap run at {current_time}%'"
+                                 "GROUP BY query_tag "
+                                 "ORDER BY 1")
+        target_schema = self.config['default_target_schema']
+        self.assertEqual(result, [{
+            'QUERY_TAG': f'PPW test tap run at {current_time}. Loading into {target_schema}."TEST_TABLE_ONE"',
+            'QUERIES': 12
+            },
+            {
+            'QUERY_TAG': f'PPW test tap run at {current_time}. Loading into {target_schema}."TEST_TABLE_THREE"',
+            'QUERIES': 10
+            },
+            {
+            'QUERY_TAG': f'PPW test tap run at {current_time}. Loading into {target_schema}."TEST_TABLE_TWO"',
+            'QUERIES': 10
+            },
+            {
+            'QUERY_TAG': f'PPW test tap run at {current_time}. Loading into unknown-schema.unknown-table',
+            'QUERIES': 4
+            }
+        ])
+
+    def test_table_stage(self):
+        """Test if data can be loaded via table stages"""
+        tap_lines = test_utils.get_test_tap_lines('messages-with-three-streams.json')
+
+        # Set s3_bucket and stage to None to use table stages
+        self.config['s3_bucket'] = None
+        self.config['stage'] = None
+        self.persist_lines_with_cache(tap_lines)
+
+        self.assert_three_streams_are_into_snowflake()
+
+    def test_custom_role(self):
+        """Test if custom role can be used"""
+        tap_lines = test_utils.get_test_tap_lines('messages-with-three-streams.json')
+
+        # Set custom role
+        self.config['role'] = 'invalid-not-existing-role'
+
+        # Using not existing or not authorized role should raise snowflake Database exception:
+        # 250001 (08001): Role 'INVALID-ROLE' specified in the connect string does not exist or not authorized.
+        with assert_raises(DatabaseError):
+            self.persist_lines_with_cache(tap_lines)

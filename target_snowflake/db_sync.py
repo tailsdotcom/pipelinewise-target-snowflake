@@ -1,18 +1,16 @@
-import os
 import json
 import sys
-import boto3
 import snowflake.connector
 import collections
 import inflection
 import re
 import itertools
 import time
-import datetime
 
 from singer import get_logger
-from snowflake.connector.encryption_util import SnowflakeEncryptionUtil
-from snowflake.connector.remote_storage_util import SnowflakeFileEncryptionMaterial
+
+from target_snowflake.s3_upload_client import S3UploadClient
+from target_snowflake.snowflake_upload_client import SnowflakeUploadClient
 
 
 class TooManyRecordsException(Exception):
@@ -22,7 +20,7 @@ class TooManyRecordsException(Exception):
 
 def validate_config(config):
     errors = []
-    required_config_keys = [
+    s3_required_config_keys = [
         'account',
         'dbname',
         'user',
@@ -32,6 +30,28 @@ def validate_config(config):
         'stage',
         'file_format'
     ]
+
+    snowflake_required_config_keys = [
+        'account',
+        'dbname',
+        'user',
+        'password',
+        'warehouse',
+        'file_format'
+    ]
+
+    required_config_keys = []
+
+    # Use external stages if both s3_bucket and stage defined
+    if config.get('s3_bucket', None) and config.get('stage', None):
+        required_config_keys = s3_required_config_keys
+    # Use table stage if none s3_bucket and stage defined
+    elif not config.get('s3_bucket', None) and not config.get('stage', None):
+        required_config_keys = snowflake_required_config_keys
+    else:
+        errors.append("Only one of 's3_bucket' or 'stage' keys defined in config. "
+                      "Use both of them if you want to use an external stage when loading data into snowflake "
+                      "or don't use any of them if you want ot use table stages.")
 
     # Check if mandatory keys exist
     for k in required_config_keys:
@@ -121,7 +141,7 @@ def flatten_schema(d, parent_key=[], sep='__', level=0, max_level=0):
         new_key = flatten_key(k, parent_key, sep)
         if 'type' in v.keys():
             if 'object' in v['type'] and 'properties' in v and level < max_level:
-                items.extend(flatten_schema(v, parent_key + [k], sep=sep, level=level+1, max_level=max_level).items())
+                items.extend(flatten_schema(v, parent_key + [k], sep=sep, level=level + 1, max_level=max_level).items())
             else:
                 items.append((new_key, v))
         else:
@@ -144,22 +164,26 @@ def flatten_schema(d, parent_key=[], sep='__', level=0, max_level=0):
 
     return dict(sorted_items)
 
+
 def _should_json_dump_value(key, value, flatten_schema=None):
     if isinstance(value, (dict, list)):
         return True
 
-    if flatten_schema and key in flatten_schema and 'type' in flatten_schema[key] and set(flatten_schema[key]['type']) == {'null', 'object', 'array'}:
+    if flatten_schema and key in flatten_schema and 'type' in flatten_schema[key] and set(
+            flatten_schema[key]['type']) == {'null', 'object', 'array'}:
         return True
 
     return False
 
-#pylint: disable-msg=too-many-arguments
+
+# pylint: disable-msg=too-many-arguments
 def flatten_record(d, flatten_schema=None, parent_key=[], sep='__', level=0, max_level=0):
     items = []
     for k, v in d.items():
         new_key = flatten_key(k, parent_key, sep)
         if isinstance(v, collections.MutableMapping) and level < max_level:
-            items.extend(flatten_record(v, flatten_schema, parent_key + [k], sep=sep, level=level+1, max_level=max_level).items())
+            items.extend(flatten_record(v, flatten_schema, parent_key + [k], sep=sep, level=level + 1,
+                                        max_level=max_level).items())
         else:
             items.append((new_key, json.dumps(v) if _should_json_dump_value(k, v, flatten_schema) else v))
 
@@ -168,6 +192,7 @@ def flatten_record(d, flatten_schema=None, parent_key=[], sep='__', level=0, max
 
 def primary_column_names(stream_schema_message):
     return [safe_column_name(p) for p in stream_schema_message['key_properties']]
+
 
 def stream_name_to_dict(stream_name, separator='-'):
     catalog_name = None
@@ -189,6 +214,39 @@ def stream_name_to_dict(stream_name, separator='-'):
         'schema_name': schema_name,
         'table_name': table_name
     }
+
+
+def create_query_tag(query_tag_pattern: str, schema: str = None, table: str = None) -> str:
+    """
+    Generate a string to tag executed queries in Snowflake.
+    Replaces tokens `schema` and `table` with the appropriate values.
+
+    Example with tokens:
+        'Loading data into {schema}.{table}'
+
+    Args:
+        query_tag_pattern:
+        schema: optional value to replace {schema} token in query_tag_pattern
+        table: optional value to replace {table} token in query_tag_pattern
+
+    Returns:
+        String if query_tag_patter defined otherwise None
+    """
+    if not query_tag_pattern:
+        return None
+
+    query_tag = query_tag_pattern
+
+    # replace tokens
+    for k, v in {
+        '{schema}': schema or 'unknown-schema',
+        '{table}': table or 'unknown-table'
+    }.items():
+        if k in query_tag:
+            query_tag = query_tag.replace(k, v)
+
+    return query_tag
+
 
 # pylint: disable=too-many-public-methods,too-many-instance-attributes
 class DbSync:
@@ -226,11 +284,12 @@ class DbSync:
             self.logger.error("Invalid configuration:\n   * {}".format('\n   * '.join(config_errors)))
             sys.exit(1)
 
-        stage = stream_name_to_dict(self.connection_config['stage'], separator='.')
-        if not stage['schema_name']:
-            self.logger.error(
-                "The named external stage object in config has to use the <schema>.<stage_name> format.")
-            sys.exit(1)
+        if self.connection_config.get('stage', None):
+            stage = stream_name_to_dict(self.connection_config['stage'], separator='.')
+            if not stage['schema_name']:
+                self.logger.error(
+                    "The named external stage object in config has to use the <schema>.<stage_name> format.")
+                sys.exit(1)
 
         self.schema_name = None
         self.grantees = None
@@ -263,7 +322,10 @@ class DbSync:
                 self.schema_name = config_default_target_schema
 
             if not self.schema_name:
-                raise Exception("Target schema name not defined in config. Neither 'default_target_schema' (string) nor 'schema_mapping' (object) defines target schema for {} stream.".format(stream_name))
+                raise Exception(
+                    "Target schema name not defined in config. "
+                    "Neither 'default_target_schema' (string) nor 'schema_mapping' (object) defines "
+                    "target schema for {} stream.".format(stream_name))
 
             #  Define grantees
             #  ---------------
@@ -283,50 +345,39 @@ class DbSync:
             #                                                           }
             self.grantees = self.connection_config.get('default_target_schema_select_permissions')
             if config_schema_mapping and stream_schema_name in config_schema_mapping:
-                self.grantees = config_schema_mapping[stream_schema_name].get('target_schema_select_permissions', self.grantees)
+                self.grantees = config_schema_mapping[stream_schema_name].get('target_schema_select_permissions',
+                                                                              self.grantees)
 
             self.data_flattening_max_level = self.connection_config.get('data_flattening_max_level', 0)
-            self.flatten_schema = flatten_schema(stream_schema_message['schema'], max_level=self.data_flattening_max_level)
+            self.flatten_schema = flatten_schema(stream_schema_message['schema'],
+                                                 max_level=self.data_flattening_max_level)
 
-        self.s3 = self.create_s3_client()
-
-    def create_s3_client(self, config=None):
-        if not config:
-            config = self.connection_config
-
-        # Get the required parameters from config file and/or environment variables
-        aws_profile = config.get('aws_profile') or os.environ.get('AWS_PROFILE')
-        aws_access_key_id = config.get('aws_access_key_id') or os.environ.get('AWS_ACCESS_KEY_ID')
-        aws_secret_access_key = config.get('aws_secret_access_key') or os.environ.get('AWS_SECRET_ACCESS_KEY')
-        aws_session_token = config.get('aws_session_token') or os.environ.get('AWS_SESSION_TOKEN')
-
-        # AWS credentials based authentication
-        if aws_access_key_id and aws_secret_access_key:
-            aws_session = boto3.session.Session(
-                aws_access_key_id=aws_access_key_id,
-                aws_secret_access_key=aws_secret_access_key,
-                aws_session_token=aws_session_token
-            )
-        # AWS Profile based authentication
+        # Use external stage
+        if connection_config.get('s3_bucket', None):
+            self.uploadClient = S3UploadClient(connection_config)
+        # Use table stage
         else:
-            aws_session = boto3.session.Session(profile_name=aws_profile)
-
-        # Create the s3 client
-        return aws_session.client('s3',
-                                  region_name=config.get('s3_region_name'),
-                                  endpoint_url=config.get('s3_endpoint_url'))
+            self.uploadClient = SnowflakeUploadClient(connection_config, self)
 
     def open_connection(self):
+        stream = None
+        if self.stream_schema_message:
+            stream = self.stream_schema_message['stream']
+
         return snowflake.connector.connect(
             user=self.connection_config['user'],
             password=self.connection_config['password'],
             account=self.connection_config['account'],
             database=self.connection_config['dbname'],
             warehouse=self.connection_config['warehouse'],
+            role=self.connection_config.get('role', None),
             autocommit=True,
             session_parameters={
                 # Quoted identifiers should be case sensitive
-                'QUOTED_IDENTIFIERS_IGNORE_CASE': 'FALSE'
+                'QUOTED_IDENTIFIERS_IGNORE_CASE': 'FALSE',
+                'QUERY_TAG': create_query_tag(self.connection_config.get('query_tag'),
+                                              schema=self.schema_name,
+                                              table=self.table_name(stream, False, True))
             }
         )
 
@@ -356,7 +407,10 @@ class DbSync:
 
         return result
 
-    def table_name(self, stream_name, is_temporary, without_schema = False):
+    def table_name(self, stream_name, is_temporary, without_schema=False):
+        if not stream_name:
+            return None
+
         stream_dict = stream_name_to_dict(stream_name)
         table_name = stream_dict['table_name']
         sf_table_name = table_name.replace('.', '_').replace('-', '_').lower()
@@ -376,7 +430,8 @@ class DbSync:
         try:
             key_props = [str(flatten[p]) for p in self.stream_schema_message['key_properties']]
         except Exception as exc:
-            self.logger.error("Cannot find {} primary key(s) in record: {}".format(self.stream_schema_message['key_properties'],
+            self.logger.error(
+                "Cannot find {} primary key(s) in record: {}".format(self.stream_schema_message['key_properties'],
                                                                      flatten))
             raise exc
         return ','.join(key_props)
@@ -386,61 +441,27 @@ class DbSync:
 
         return ','.join(
             [
-                json.dumps(flatten[name], ensure_ascii=False) if name in flatten and (flatten[name] == 0 or flatten[name]) else ''
+                json.dumps(flatten[name], ensure_ascii=False) if name in flatten and (
+                            flatten[name] == 0 or flatten[name]) else ''
                 for name in self.flatten_schema
             ]
         )
 
     def put_to_stage(self, file, stream, count, temp_dir=None):
-        self.logger.info("Uploading {} rows to external snowflake stage on S3".format(count))
+        self.logger.info("Uploading {} rows to stage".format(count))
+        return self.uploadClient.upload_file(file, stream, temp_dir)
 
-        # Generating key in S3 bucket
-        bucket = self.connection_config['s3_bucket']
-        s3_acl = self.connection_config.get('s3_acl')
-        s3_key_prefix = self.connection_config.get('s3_key_prefix', '')
-        s3_key = "{}pipelinewise_{}_{}.csv".format(s3_key_prefix, stream, datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f"))
+    def delete_from_stage(self, stream, s3_key):
+        self.logger.info("Deleting {} from stage".format(s3_key))
+        self.uploadClient.delete_object(stream, s3_key)
 
-        self.logger.info("Target S3 bucket: {}, local file: {}, S3 key: {}".format(bucket, file, s3_key))
+    def get_stage_name(self, stream):
+        stage = self.connection_config.get('stage', None)
+        if stage:
+            return stage
 
-        # Encrypt csv if client side encryption enabled
-        master_key = self.connection_config.get('client_side_encryption_master_key', '')
-        if master_key != '':
-            # Encrypt the file
-            encryption_material = SnowflakeFileEncryptionMaterial(
-                query_stage_master_key=master_key,
-                query_id='',
-                smk_id=0
-            )
-            encryption_metadata, encrypted_file = SnowflakeEncryptionUtil.encrypt_file(
-                encryption_material,
-                file,
-                tmp_dir=temp_dir
-            )
-
-            # Upload to s3
-            extra_args = {'ACL': s3_acl} if s3_acl else dict()
-
-            # Send key and iv in the metadata, that will be required to decrypt and upload the encrypted file
-            extra_args['Metadata'] = {
-                'x-amz-key': encryption_metadata.key,
-                'x-amz-iv': encryption_metadata.iv
-            }
-            self.s3.upload_file(encrypted_file, bucket, s3_key, ExtraArgs=extra_args)
-
-            # Remove the uploaded encrypted file
-            os.remove(encrypted_file)
-
-        # Upload to S3 without encrypting
-        else:
-            extra_args = {'ACL': s3_acl} if s3_acl else None
-            self.s3.upload_file(file, bucket, s3_key, ExtraArgs=extra_args)
-
-        return s3_key
-
-    def delete_from_stage(self, s3_key):
-        self.logger.info("Deleting {} from external snowflake stage on S3".format(s3_key))
-        bucket = self.connection_config['s3_bucket']
-        self.s3.delete_object(Bucket=bucket, Key=s3_key)
+        table_name = self.table_name(stream, False, without_schema=True)
+        return f"{self.schema_name}.%{table_name}"
 
     def load_csv(self, s3_key, count, size_bytes):
         stream_schema_message = self.stream_schema_message
@@ -476,8 +497,9 @@ class DbSync:
                             VALUES ({})
                     """.format(
                         self.table_name(stream, False),
-                        ', '.join(["{}(${}) {}".format(c['trans'], i + 1, c['name']) for i, c in enumerate(columns_with_trans)]),
-                        self.connection_config['stage'],
+                        ', '.join(["{}(${}) {}".format(c['trans'], i + 1, c['name']) for i, c in
+                                   enumerate(columns_with_trans)]),
+                        self.get_stage_name(stream),
                         s3_key,
                         self.connection_config['file_format'],
                         self.primary_key_merge_condition(),
@@ -501,7 +523,7 @@ class DbSync:
                     """.format(
                         self.table_name(stream, False),
                         ', '.join([c['name'] for c in columns_with_trans]),
-                        self.connection_config['stage'],
+                        self.get_stage_name(stream),
                         s3_key,
                         self.connection_config['file_format'],
                     )
@@ -745,7 +767,10 @@ class DbSync:
         self.query(drop_column)
 
     def version_column(self, column_name, stream):
-        version_column = "ALTER TABLE {} RENAME COLUMN {} TO \"{}_{}\"".format(self.table_name(stream, False), column_name, column_name.replace("\"",""), time.strftime("%Y%m%d_%H%M"))
+        version_column = "ALTER TABLE {} RENAME COLUMN {} TO \"{}_{}\"".format(self.table_name(stream, False),
+                                                                               column_name,
+                                                                               column_name.replace("\"", ""),
+                                                                               time.strftime("%Y%m%d_%H%M"))
         self.logger.info('Dropping column: {}'.format(version_column))
         self.query(version_column)
 

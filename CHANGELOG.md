@@ -1,3 +1,26 @@
+1.10.0 (2020-12-03)
+-------------------
+
+- Add `{{database}}` token to `query_tag` parameter
+- Use Jinja style `query_tag` template variables
+
+1.9.1 (2020-12-02)
+-------------------
+
+- Fixed a dependency issue
+- Add everything from the unreleased `1.9.0`
+
+1.9.0 (2020-11-18) - NOT RELEASED TO PyPI
+-----------------------------------------
+
+- Use snowflake table stages by default to load data into tables
+- Add optional `query_tag` parameter
+- Add optional `role` parameter to use custom roles
+- Fixed an issue when generated file names were not compatible with windows
+- Bump `joblib` to `0.16.0` to be python 3.8 compatible
+- Bump `snowflake-connectory-python` to `2.3.6`
+- Bump `boto3` to `1.16.20`
+
 1.8.0 (2020-08-03)
 -------------------
 

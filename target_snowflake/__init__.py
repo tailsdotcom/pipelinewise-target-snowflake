@@ -24,7 +24,6 @@ from dateutil.parser import ParserError
 from jsonschema import Draft7Validator, FormatChecker
 from singer import get_logger
 
-from target_snowflake.clients import *
 from target_snowflake.db_sync import DbSync
 import target_snowflake.utils as utils
 

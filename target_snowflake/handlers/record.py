@@ -5,7 +5,7 @@ import gzip
 from tempfile import mkstemp
 from joblib import Parallel, delayed, parallel_backend
 
-from target_snowflake import LOGGER, load_line
+from target_snowflake.utils import LOGGER, load_line
 from target_snowflake.handlers import (
     adjust_timestamps_in_record, validate_record,
     add_metadata_values_to_record,

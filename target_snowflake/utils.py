@@ -1,4 +1,16 @@
+import json
 from decimal import Decimal
+from singer import get_logger
+
+LOGGER = get_logger('target_snowflake')
+
+
+def load_line(line):
+    try:
+        return json.loads(line)
+    except json.decoder.JSONDecodeError:
+        LOGGER.error("Unable to parse:\n{}".format(line))
+        raise
 
 
 def float_to_decimal(value):

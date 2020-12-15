@@ -22,12 +22,10 @@ from dateutil import parser
 from dateutil.parser import ParserError
 
 from jsonschema import Draft7Validator, FormatChecker
-from singer import get_logger
 
-from target_snowflake.db_sync import DbSync
 import target_snowflake.utils as utils
-
-LOGGER = get_logger('target_snowflake')
+from target_snowflake.db_sync import DbSync
+from target_snowflake.utils import LOGGER, load_line
 
 # Tone down snowflake.connector log noise by only outputting warnings and higher level messages
 logging.getLogger('snowflake.connector').setLevel(logging.WARNING)
@@ -40,6 +38,7 @@ MAX_TIMESTAMP = '9999-12-31 23:59:59.999999'
 # max time supported in SF, used to reset all invalid times that are beyond this value
 MAX_TIME = '23:59:59.999999'
 
+# handlers relies on variables above
 from target_snowflake.handlers import record as record_handler
 
 
@@ -76,14 +75,6 @@ def load_table_cache(config):
             table_schemas=get_schema_names_from_config(config))
 
     return table_cache
-
-
-def load_line(line):
-    try:
-        return json.loads(line)
-    except json.decoder.JSONDecodeError:
-        LOGGER.error("Unable to parse:\n{}".format(line))
-        raise
 
 
 # pylint: disable=too-many-locals,too-many-branches,too-many-statements

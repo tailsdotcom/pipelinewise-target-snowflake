@@ -1,5 +1,17 @@
-1.9.0 (2020-11-18)
+1.10.0 (2020-12-03)
 -------------------
+
+- Add `{{database}}` token to `query_tag` parameter
+- Use Jinja style `query_tag` template variables
+
+1.9.1 (2020-12-02)
+-------------------
+
+- Fixed a dependency issue
+- Add everything from the unreleased `1.9.0`
+
+1.9.0 (2020-11-18) - NOT RELEASED TO PyPI
+-----------------------------------------
 
 - Use snowflake table stages by default to load data into tables
 - Add optional `query_tag` parameter

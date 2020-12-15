@@ -9,8 +9,8 @@ import time
 
 from singer import get_logger
 
-from clients.s3_upload_client import S3UploadClient
-from clients.snowflake_upload_client import SnowflakeUploadClient
+from target_snowflake.clients.s3_upload_client import S3UploadClient
+from target_snowflake.clients.snowflake_upload_client import SnowflakeUploadClient
 
 
 class TooManyRecordsException(Exception):

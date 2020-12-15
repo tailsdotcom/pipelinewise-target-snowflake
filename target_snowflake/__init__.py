@@ -92,6 +92,8 @@ def persist_lines(config, lines, table_cache=None) -> None:
     # - use as many threads as possible, up to max_parallelism
     if parallelism == 0:
         parallelism = max_parallelism
+    elif parallelism == -1:
+        raise NotImplementedError("-1 parallelism documented but not implemented.")
 
     # RECORD variables
     records_to_load = {}
@@ -225,7 +227,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
 
             # Do we have enough full buckets to begin flushing them?
             if (
-                len(buckets_to_flush) == parallelism
+                len(buckets_to_flush) >= parallelism
                 or (len(buckets_to_flush) > 0 and config.get('flush_all_streams'))
             ):
                 if config.get('flush_all_streams'):
@@ -256,7 +258,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
 
             # Do we have enough batches to begin flushing them?
             if (
-                len(batches_to_flush) == parallelism
+                len(batches_to_flush) >= parallelism
                 or (len(batches_to_flush) > 0 and config.get('flush_all_streams'))
             ):
                 # flush batches

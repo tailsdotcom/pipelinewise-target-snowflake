@@ -78,6 +78,14 @@ def load_table_cache(config):
     return table_cache
 
 
+def load_line(line):
+    try:
+        return json.loads(line)
+    except json.decoder.JSONDecodeError:
+        LOGGER.error("Unable to parse:\n{}".format(line))
+        raise
+
+
 # pylint: disable=too-many-locals,too-many-branches,too-many-statements
 def persist_lines(config, lines, table_cache=None) -> None:
     # global variables

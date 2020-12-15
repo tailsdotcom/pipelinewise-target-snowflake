@@ -3,8 +3,9 @@ import json
 import copy
 import gzip
 from tempfile import mkstemp
-from target_snowflake import LOGGER
 from joblib import Parallel, delayed, parallel_backend
+
+from target_snowflake import LOGGER, load_line
 from target_snowflake.handlers import (
     adjust_timestamps_in_record, validate_record,
     add_metadata_values_to_record,
@@ -124,14 +125,6 @@ def transform_records(config, schema, record_messages, validator):
             record_message=record_message, schema=schema
         )
         yield record_message
-
-
-def load_line(line):
-    try:
-        return json.loads(line)
-    except json.decoder.JSONDecodeError:
-        LOGGER.error("Unable to parse:\n{}".format(line))
-        raise
 
 
 def read_lines(file_handler):

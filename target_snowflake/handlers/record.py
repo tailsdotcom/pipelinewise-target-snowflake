@@ -1,5 +1,5 @@
 import os
-import json
+import time
 import copy
 import gzip
 from tempfile import mkstemp
@@ -9,7 +9,6 @@ from target_snowflake.utils import LOGGER, load_line
 from target_snowflake.handlers import (
     adjust_timestamps_in_record, validate_record,
     add_metadata_values_to_record,
-    add_metadata_columns_to_schema
 )
 
 
@@ -139,8 +138,8 @@ def load_batch(
     config, schema, validator, stream,
     batch, row_count, db_sync
 ):
+    tic = time.clock()
     filepath = batch.get('filepath')
-    LOGGER.info(f"START processing batch file: {filepath}")
     assert (batch.get('format') == 'jsonl') and (batch.get('compression') is None), \
         "This tap only supports uncompressed jsonl files (for now)."
     with open(filepath, 'r', buffering=1024*1024*50) as batch_file:
@@ -149,7 +148,8 @@ def load_batch(
             config, schema, validator, stream,
             records, row_count, db_sync
         )
-    LOGGER.info(f"END processing batch file: {filepath}")
+    toc = time.clock()
+    LOGGER.info(f"Processed batch file: '{filepath}' in {(toc - tic)}s")
 
 
 def load_records(

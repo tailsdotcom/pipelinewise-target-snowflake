@@ -110,12 +110,6 @@ def persist_lines(config, lines, table_cache=None) -> None:
     # SCHEMA variables
     key_properties = {}
 
-    batch = config.get('fast_sync')
-    if batch in ('true', 1, 'True', 'TRUE'):  # catch env config
-        batch = True
-    if batch:
-        LOGGER.info("Fast Sync Enabled")
-
     # Loop over lines from stdin
     for line in lines:
         o = load_line(line)

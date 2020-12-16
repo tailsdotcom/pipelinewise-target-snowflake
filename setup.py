@@ -24,7 +24,8 @@ setup(
         'snowflake-connector-python==2.3.6',
         'inflection==0.3.1',
         'joblib==0.16.0',
-        'python-dateutil==2.8.1'
+        'python-dateutil==2.8.1',
+        'ujson==4.0.1'
     ],
     extras_require={
         "test": [

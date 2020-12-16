@@ -107,17 +107,17 @@ def flush_batches(
     return batches, flushed_state
 
 
-def transform_records(config, schema, record_messages, validator):
+def transform_records(schema, record_messages, validator, validate_records, add_metadata_columns, hard_delete):
     """ Generator to transform a collection of record messages from the same stream.
     """
     for record_message in record_messages:
         # Validate record
         # TODO: should we validate before or after transforming?
-        if config.get('validate_records'):
+        if validate_records:
             validate_record(record_message, validator)
 
         # Add metadata values to record
-        if config.get('add_metadata_columns') or config.get('hard_delete'):
+        if add_metadata_columns or hard_delete:
             record_message = add_metadata_values_to_record(record_message)
 
         # Truncate timestamps that are unsupported by Snowflake
@@ -140,14 +140,16 @@ def load_batch(
     batch, row_count, db_sync
 ):
     filepath = batch.get('filepath')
+    LOGGER.info(f"START processing batch file: {filepath}")
     assert (batch.get('format') == 'jsonl') and (batch.get('compression') is None), \
         "This tap only supports uncompressed jsonl files (for now)."
-    with open(filepath, 'r') as batch_file:
+    with open(filepath, 'r', buffering=1024*1024*50) as batch_file:
         records = read_lines(batch_file)
         load_records(
             config, schema, validator, stream,
             records, row_count, db_sync
         )
+    LOGGER.info(f"END processing batch file: {filepath}")
 
 
 def load_records(
@@ -158,6 +160,8 @@ def load_records(
     no_compression = config.get('no_compression', False)
     delete_rows = config.get('hard_delete', False)
     temp_dir = config.get('temp_dir')
+    validate_records = config.get('validate_records', False)
+    add_metadata_columns = config.get('add_metadata_columns', False)
 
     # Load into snowflake
     if records:
@@ -171,20 +175,23 @@ def load_records(
         record_to_csv_line_transformer = db_sync.record_to_csv_line
 
         # get record transformation generator
-        transformed_records = transform_records(config, schema, records, validator)
+        transformed_records = transform_records(
+            schema=schema, record_messages=records, validator=validator,
+            validate_records=validate_records, add_metadata_columns=add_metadata_columns,
+            hard_delete=delete_rows
+        )
 
         # Using gzip or plain file object
         if no_compression:
-            with open(csv_fd, 'wb') as outfile:
+            with open(csv_fd, 'wb', buffering=1024*1024*50) as outfile:
                 write_records_to_file(
                     records=transformed_records,
                     outfile=outfile,
                     record_to_csv_line_transformer=record_to_csv_line_transformer
                 )
         else:
-            with open(csv_fd, 'wb') as outfile:
+            with open(csv_fd, 'wb', buffering=1024*1024*50) as outfile:
                 with gzip.GzipFile(filename=csv_file, mode='wb', fileobj=outfile) as gzipfile:
-                    transformed_records = transform_records(config, schema, records, validator)
                     write_records_to_file(
                         records=transformed_records,
                         outfile=gzipfile,

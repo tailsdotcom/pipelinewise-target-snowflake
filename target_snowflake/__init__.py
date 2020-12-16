@@ -252,6 +252,8 @@ def persist_lines(config, lines, table_cache=None) -> None:
             utils.check_message_has_schema(line, o, schemas)
 
             batch_message = o
+            LOGGER.info(f"Received batch message for file: {o['filepath']}")
+
             # batches are already bucketed by stream, so we can
             # just track batches
             batches_to_flush.append(batch_message)
@@ -261,6 +263,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
                 len(batches_to_flush) >= parallelism
                 or (len(batches_to_flush) > 0 and config.get('flush_all_streams'))
             ):
+                LOGGER.info(f"Flushing {len(batches_to_flush)} batches.")
                 # flush batches
                 batches_to_flush, flushed_state = record_handler.flush_batches(
                     config=config, schemas=schemas, validators=validators,

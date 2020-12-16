@@ -1,8 +1,18 @@
-import json
 from decimal import Decimal
 from singer import get_logger
 
 LOGGER = get_logger('target_snowflake')
+
+# Ty to find faster json implementations
+try:
+    import ujson as json
+    LOGGER.info("Found ujson.")
+except ImportError:
+    try:
+        import simplejson as json
+        LOGGER.info("Found simplejson.")
+    except ImportError:
+        import json
 
 
 def load_line(line):

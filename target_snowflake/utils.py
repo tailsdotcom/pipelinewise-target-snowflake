@@ -6,11 +6,11 @@ LOGGER = get_logger('target_snowflake')
 # Ty to find faster json implementations
 try:
     import ujson as json
-    LOGGER.info("Found ujson.")
+    LOGGER.info("Using ujson.")
 except ImportError:
     try:
         import simplejson as json
-        LOGGER.info("Found simplejson.")
+        LOGGER.info("Using simplejson.")
     except ImportError:
         import json
 

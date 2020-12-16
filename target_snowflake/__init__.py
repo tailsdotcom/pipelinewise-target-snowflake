@@ -103,6 +103,8 @@ def persist_lines(config, lines, table_cache=None) -> None:
     buckets_to_flush = []
 
     # BATCH variables
+    total_batches = 0
+    batch_queue_warm_up = 1
     batches_to_flush = []
 
     # SCHEMA variables
@@ -253,15 +255,18 @@ def persist_lines(config, lines, table_cache=None) -> None:
 
             batch_message = o
             LOGGER.info(f"Received batch message for file: {o['filepath']}")
+            total_batches += 1
 
             # batches are already bucketed by stream, so we can
             # just track batches
             batches_to_flush.append(batch_message)
-
+            batch_queue_depth = len(batches_to_flush)
             # Do we have enough batches to begin flushing them?
             if (
-                len(batches_to_flush) >= parallelism
-                or (len(batches_to_flush) > 0 and config.get('flush_all_streams'))
+                # don't wait for a full queue to start processing (avoid slow start)
+                (batch_queue_warm_up == batch_queue_depth and batch_queue_warm_up <= parallelism)
+                or (batch_queue_depth >= parallelism)
+                or (batch_queue_depth > 0 and config.get('flush_all_streams'))
             ):
                 LOGGER.info(f"Flushing {len(batches_to_flush)} batches.")
                 # flush batches
@@ -273,6 +278,9 @@ def persist_lines(config, lines, table_cache=None) -> None:
                 )
                 # emit last encountered state
                 emit_state(copy.deepcopy(flushed_state))
+                # Keep scaling the batch queue warm-up until greater than parallelism
+                if batch_queue_warm_up <= parallelism:
+                    batch_queue_warm_up = batch_queue_warm_up * 2
 
         elif t == 'ACTIVATE_VERSION':
             LOGGER.debug('ACTIVATE_VERSION message')

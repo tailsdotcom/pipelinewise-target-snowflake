@@ -140,6 +140,7 @@ def load_batch(
 ):
     tic = time.clock()
     filepath = batch.get('filepath')
+    LOGGER.info(f"Started processing batch file: '{filepath}'")
     assert (batch.get('format') == 'jsonl') and (batch.get('compression') is None), \
         "This tap only supports uncompressed jsonl files (for now)."
     with open(filepath, 'r', buffering=1024*1024*50) as batch_file:

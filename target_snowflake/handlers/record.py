@@ -56,7 +56,7 @@ def flush_stream_buckets(
             flushed_state['bookmarks'][stream] = copy.deepcopy(state['bookmarks'][stream])
     streams_to_flush = []
     # Return with state message with flushed positions
-    return flushed_state, streams_to_flush
+    return streams_to_flush, flushed_state
 
 
 # pylint: disable=too-many-arguments

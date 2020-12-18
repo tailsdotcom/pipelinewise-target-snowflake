@@ -232,7 +232,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
                     streams = buckets_to_flush
 
                 # Flush and return a new state dict with new positions only for the flushed streams
-                flushed_state = record_handler.flush_stream_buckets(
+                buckets_to_flush, flushed_state = record_handler.flush_stream_buckets(
                     config=config, schemas=schemas, validators=validators,
                     buckets=records_to_load, streams_to_flush=streams,
                     parallelism=parallelism, row_count=row_count,

@@ -223,7 +223,11 @@ def persist_lines(config, lines, table_cache=None) -> None:
 
             # Do we have enough full buckets to begin flushing them?
             if (
-                len(buckets_to_flush) >= parallelism
+                # we are replicating fewer streams than parallelism
+                len(buckets_to_flush) == len(stream_to_sync.keys())
+                # we have enough records in enough streams to flush them all in parallel
+                or len(buckets_to_flush) >= parallelism
+                # we have at least 1 full bucket and 'flush_all_streams' is configured
                 or (len(buckets_to_flush) > 0 and config.get('flush_all_streams'))
             ):
                 if config.get('flush_all_streams'):

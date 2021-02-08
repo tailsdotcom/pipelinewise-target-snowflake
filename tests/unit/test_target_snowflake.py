@@ -121,7 +121,7 @@ class TestTargetSnowflake(unittest.TestCase):
         # Write uncompressed CSV file
         csv_file = tempfile.NamedTemporaryFile(delete=False)
         with open(csv_file.name, 'wb') as f:
-            target_snowflake.handlers.record.write_records_to_file(f, records, _mock_record_to_csv_line)
+            target_snowflake.handlers.record.write_records_to_file(records, f, _mock_record_to_csv_line)
 
         # Read and validate uncompressed CSV file
         with open(csv_file.name, 'rt') as f:
@@ -135,7 +135,7 @@ class TestTargetSnowflake(unittest.TestCase):
         # Write gzip compressed CSV file
         csv_file = tempfile.NamedTemporaryFile(delete=False)
         with gzip.open(csv_file.name, 'wb') as f:
-            target_snowflake.handlers.record.write_records_to_file(f, records, _mock_record_to_csv_line)
+            target_snowflake.handlers.record.write_records_to_file(records, f, _mock_record_to_csv_line)
 
         # Read and validate gzip compressed CSV file
         with gzip.open(csv_file.name, 'rt') as f:

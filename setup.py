@@ -21,7 +21,7 @@ setup(
     install_requires=[
         'idna==2.7',
         'pipelinewise-singer-python==1.2.*',
-        'snowflake-connector-python==2.3.6',
+        'snowflake-connector-python==2.3.10',
         'inflection==0.3.1',
         'joblib==0.16.0',
         'python-dateutil==2.8.1',

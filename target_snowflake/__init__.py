@@ -149,7 +149,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
                 # if same stream has been encountered again, it means the schema might have been altered
                 # so previous records need to be flushed
                 if row_count.get(stream, 0) > 0:
-                    flushed_state = record_handler.flush_stream_buckets(
+                    _, flushed_state = record_handler.flush_stream_buckets(
                         config=config, schema=old_schema, validator=old_validator,
                         buckets=records_to_load, streams_to_flush=[stream],
                         parallelism=parallelism, row_count=row_count, state=state,
@@ -293,7 +293,7 @@ def persist_lines(config, lines, table_cache=None) -> None:
     if sum(row_count.values()) > 0:
         # flush all streams one last time, delete records if needed, reset counts and then emit current state
         streams = list(records_to_load.keys())
-        flushed_state = record_handler.flush_stream_buckets(
+        _, flushed_state = record_handler.flush_stream_buckets(
             config=config, schemas=schemas, validators=validators,
             buckets=records_to_load, streams_to_flush=streams,
             parallelism=parallelism, row_count=row_count,

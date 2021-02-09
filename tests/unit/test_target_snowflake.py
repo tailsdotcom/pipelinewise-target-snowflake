@@ -32,7 +32,7 @@ class TestTargetSnowflake(unittest.TestCase):
         instance.create_schema_if_not_exists.return_value = None
         instance.sync_table.return_value = None
 
-        flush_stream_buckets_mock.return_value = '{"currently_syncing": null}'
+        flush_stream_buckets_mock.return_value = ([], '{"currently_syncing": null}')
 
         target_snowflake.persist_lines(self.config, lines)
 
@@ -52,7 +52,7 @@ class TestTargetSnowflake(unittest.TestCase):
         instance.create_schema_if_not_exists.return_value = None
         instance.sync_table.return_value = None
 
-        flush_stream_buckets_mock.return_value = '{"currently_syncing": null}'
+        flush_stream_buckets_mock.return_value = ([], '{"currently_syncing": null}')
 
         target_snowflake.persist_lines(self.config, lines)
 
